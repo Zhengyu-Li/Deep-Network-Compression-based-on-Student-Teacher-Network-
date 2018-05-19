@@ -3,34 +3,35 @@
 This guideline is to guide you to train/test the original DenseNet model or the Student-Teacher model. The paper can be found in XXX. 
 All of our codes are based on Tensorflow and Python.
 The file organization is shown below.
-**teacher_student**
-----cifar100
---------cifar-100-python
-------------train(cifar100 training data)
-------------test(cifar100 test data)
-----data_providers
---------cifar.py(for original training data)
---------base_provider.py(for original training data)
---------cifar2.py(for intermediate outputs)
---------data_providers2.py(for intermediate outputs)
-----models
---------dense_net.py
-----eval.py (for model evaluation)
-----get_teacher.py (for get intermediate outputs)
-----run_dense_net.py (for training/test student network**)
-----student1.py
-----student2.py
-----student3.py
-**multi-gpu**
-----cifar100
---------train
---------test
-----architectures
---------densene.py
-----arch.py
-----data_loader.py(read data)
-----train.py
-----eval.py
+**teacher_student**  
+----cifar100  
+--------cifar-100-python  
+------------train(cifar100 training data)  
+------------test(cifar100 test data)  
+----data_providers  
+--------cifar.py(for original training data)  
+--------base_provider.py(for original training data)  
+--------cifar2.py(for intermediate outputs)  
+--------data_providers2.py(for intermediate outputs)  
+----models  
+--------dense_net.py  
+----eval.py (for model evaluation)  
+----get_teacher.py (for get intermediate outputs)  
+----run_dense_net.py (for training/test student network)  
+----student1.py  
+----student2.py  
+----student3.py  
+**multi-gpu**  
+----cifar100  
+--------train  
+--------test  
+----architectures  
+--------densene.py  
+----arch.py  
+----data_loader.py(read data)  
+----train.py  
+----eval.py  
+***  
 # Training & Testing Original DenseNet
 Here are the paper and official implementation of DenseNet:
 Paper: [DenseNet]
@@ -89,7 +90,7 @@ Our codes (multi-gpu folder) are based on [Arashno's implementation]
                    --batch_size=200
   ```
 - For more details, please follow the comments in python files.
-
+***  
 # Training & Testing Student DenseNet
 The basic idea is to use intermediate outputs of the teacher network to guide the student network. For more details about the Student-Teacher Network and our training strategies, please reference to my thesis [Deep Network Compression based on Student-Teacher Network].
 Our codes are bassed on [Illarion Khlestov's implementation].
@@ -114,6 +115,7 @@ In our project, we use three training strategies: same learning rate without ext
 - Third, make sure the network structure and training configurations in file ```student3.py``` are right.
 - Run ```student3.py```
 - Run ```eval.py``` to evaluate model (follow the comments in file to change setting)
+***  
 # Use TensorBoard on Macbook
 Tensorboard is a convenient tool to check training. The details can be found at https://www.tensorflow.org/programmers_guide/summaries_and_tensorboard. 
 #### Installation
