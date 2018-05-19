@@ -2,7 +2,7 @@
 # Introduction
 This guideline is to guide you to train/test the original DenseNet model or the Student-Teacher model. The paper can be found in XXX. 
 All of our codes are based on Tensorflow and Python.
-The file organization is shown below.
+The file organization is shown below.  
 **teacher_student**  
 ----cifar100  
 --------cifar-100-python  
