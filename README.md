@@ -145,7 +145,7 @@ When training on the server, the summary files will be saved on the server, too.
 $ ssh -L 16006:127.0.0.1:6006 user@server-address
 ```
 Then start TensorBoard in server with same command.
-Now you can open TensorBoard at http://127.0.0.1:6006 in your machine's browser.
+Now you can open TensorBoard at http://127.0.0.1:16006 in your machine's browser.
 
 
 [Arashno's implementation]: <https://github.com/arashno/tensorflow_multigpu_imagenet> 
