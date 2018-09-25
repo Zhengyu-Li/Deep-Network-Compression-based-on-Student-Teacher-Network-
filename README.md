@@ -102,14 +102,16 @@ $ python get_teacher.py
 ```
 It will generate "train_data.h5" (contain the original images, labels and all of the intermediate outputs) and "test_data.h5" files.
 #### Train & Test Student
-In our project, we use three training strategies: same learning rate without extended layer (student1.py, Section 3.3.1), same learning rate with extended layer (student2.py, Section 3.3.2) and different learning rates(student3.py, Section 3.3.3).
+In our project, we use three training strategies: same learning rate without extended layer (student1.py, Section 3.3.1), same learning rate with extended layer (student2.py, Section 3.3.2) and different learning rates(student3.py, Section 3.3.3).  
+
 **1. Use same learning rate**
 - First, install the requirements in "requirements.txt" in "teacher_student" folder.
 - Second, follow the comments and change configurations in file ```./teacher_student/data_providers/cifar2.py```. 
 - Third, make sure the network structure and training configurations in file ```student1.py``` or ```student2.py``` are right.
 - Run ```student1.py``` or ```student2.py```
-- Run ```eval.py``` to evaluate model (follow the comments in file to change setting)
-**2. Use different learning rate**
+- Run ```eval.py``` to evaluate model (follow the comments in file to change setting)  
+
+**2. Use different learning rate**  
 - First, install the requirements in "requirements.txt" in "teacher_student" folder.
 - Second, follow the comments and change configurations in file ```./teacher_student/data_providers/cifar2.py```. 
 - Third, make sure the network structure and training configurations in file ```student3.py``` are right.
