@@ -1,6 +1,6 @@
 # Deep-Network-Compression-based-on-Student-Teacher-Network-
 # Introduction
-This guideline is to guide you to train/test the original DenseNet model or the Student-Teacher model. The paper can be found in XXX. 
+This guideline is to guide you to train/test the original DenseNet model or the Student-Teacher model. 
 All of our codes are based on Tensorflow and Python.
 The file organization is shown below.  
 **teacher_student**  
