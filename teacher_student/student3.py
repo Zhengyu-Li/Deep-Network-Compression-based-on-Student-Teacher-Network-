@@ -5,46 +5,35 @@ from datetime import timedelta
 
 import numpy as np
 import tensorflow as tf
-from data_providers.utils import get_data_provider_by_name
+from data_providers.utils2 import get_data_provider_by_name
 import argparse
-#os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
-logs_path = '/home/zhengyu/smodel_100_v7/'
-save_path = '/home/zhengyu/smodel_100_v7/'
+logs_path = './logs/smodel3/c100' #path to save summaries
+save_path = './saves/smodel3/c100' #path to save models
 train_params = {
     'batch_size': 32,
     'iterations of one epoch': 1562,
     'initial_learning_rate': '1e-6, 1e-7, 1e-7',
-    'reduce_lr_epoch': 50,  # epochs * 0.5
     'validation_set': True,
     'validation_split': None,  # None or float
-    'shuffle': None,  # None, once_prior_train, every_epoch
-    'normalization': None,  # None, divide_256, divide_255, by_chanels
+    'shuffle': 'every_epoch',  # None, once_prior_train, every_epoch
+    'normalization': 'by_chanels',  # None, divide_256, divide_255, by_chanels
 }
 
-data_provider = get_data_provider_by_name('C100', train_params)
+data_provider = get_data_provider_by_name('C100', train_params) #change to your dataset
 data_shape = data_provider.data_shape
-n_classes = 100
+layer_output = [16, 8] #if choose MNIST, set it to [14, 7]
+n_classes = 100 #change according to the dataset
 data = data_provider.train
-student_depth = 100
+student_depth = 16 # depth of student DenseNet
 nesterov_momentum = 0.9
-batch_size = 32
-weight_decay = 1e-4
-lr0 = float(1e-6)
-lr1 = 1e-7
-lr2 = 1e-7
+lr_decay = [140,210,280,350,420,490,560,630,700,770,840] #the epoch to reduce learning rate
+weight_decay = 1
+total_epoch = 700 # set the number of epochs you want to train 
 val = data_provider.test
 
-def labels_to_one_hot(labels):
-    """Convert 1D array of labels to one hot representation
-
-    Args:
-        labels: 1D numpy array
-    """
-    new_labels = np.zeros((labels.shape[0], 100))
-    new_labels[range(labels.shape[0]), labels] = np.ones(labels.shape)
-    return new_labels
 
 def weight_variable_msra(shape, name):
     return tf.get_variable(
@@ -94,7 +83,7 @@ def dropout(_input, is_training, keep_prob):
         output = _input
     return output
 
-def composite_function(_input, out_features, is_training, kernel_size=3, keep_prob=0.5):
+def composite_function(_input, out_features, is_training, kernel_size=3, keep_prob=0.8):
     """Function from paper H_l that performs:
     - batch normalization
     - ReLU nonlinearity
@@ -112,7 +101,7 @@ def composite_function(_input, out_features, is_training, kernel_size=3, keep_pr
         output = dropout(output, is_training, keep_prob)
     return output
 
-def bottleneck(_input, out_features, is_training, keep_prob=0.5):
+def bottleneck(_input, out_features, is_training, keep_prob=0.8):
     with tf.variable_scope("bottleneck"):
         output = batch_norm(_input, is_training=is_training)
         output = tf.nn.relu(output)
@@ -237,7 +226,7 @@ def build_student(images,
         # output feature = 216
     with tf.name_scope('Transition_after_Block_0'):
         with tf.variable_scope("Student_Transition_after_Block_0"):
-            block0_output = composite_function(block0_out, out_features=660, kernel_size=1, is_training=is_training)
+            block0_output = composite_function(block0_out, out_features=108, kernel_size=1, is_training=is_training)
             block0_output = avg_pool(block0_output, k=2)
 
     with tf.name_scope('Block_1'):
@@ -246,7 +235,7 @@ def build_student(images,
 
     with tf.name_scope('Transition_after_Block_1'):
         with tf.variable_scope("Student_Transition_after_Block_1"):
-            block1_output = composite_function(block1_out, out_features=950, kernel_size=1, is_training=is_training)
+            block1_output = composite_function(block1_out, out_features=150, kernel_size=1, is_training=is_training)
             block1_output = avg_pool(block1_output, k=2)
 
     with tf.name_scope('Block_2'):
@@ -260,13 +249,16 @@ def build_student(images,
     return block0_output, block1_output, logits
 
 def gradient_compute(op, loss, var, index):
+    '''compute gradients according to different loss and learning rate'''
     name = 'gradient%s' % index
     with tf.name_scope(name):
         gradient = op.compute_gradients(loss, var)
         return gradient
 
+# If you have more sets of variables, 
+# you need to add more functions to compute average gradients for each set
 def my_gradient0(g00, g01, g02):
-    
+    '''compute average gradients for variable set 1'''
     g = []
     for i in range(0, len(g00)):
 
@@ -283,7 +275,7 @@ def my_gradient0(g00, g01, g02):
     return g
 
 def my_gradient1(g11, g12):
-    
+    '''compute average gradients for variable set 2'''
     g = []
     for i in range(0, len(g11)):
 
@@ -299,30 +291,24 @@ def my_gradient1(g11, g12):
     return g
 
 def my_gradient2(g22):
-
+    '''compute average gradients for variable set 3'''
     g = []
     for i in range(0, len(g22)):
 
         (grad1, val1) = g22[i]
 
         if val1 is not None:
-
                 g.append(grad1)
         else:
             print ("failure mode : no grads")
             continue
     return g
 
-
+lr0 = train_params['initial_learning_rate'][0]
+lr1 = train_params['initial_learning_rate'][1]
+lr2 = train_params['initial_learning_rate'][2]
 
 if __name__ == '__main__':
-    
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--lr0', type=float, help='lr0')
-    parser.add_argument('--lr1', type=float, help='lr1')
-    parser.add_argument('--lr2', type=float, help='lr2')
-    args = parser.parse_args()
 
     shape = [None]
     shape.extend(data_shape)
@@ -337,11 +323,11 @@ if __name__ == '__main__':
         learning_rate2 = tf.placeholder(tf.float32, shape=[], name='learning_rate2')
 
     with tf.name_scope('teacher_output0'):
-        teacher_output0 = tf.placeholder(tf.float32, shape=[None, 16, 16, 660], name='input_teacher0')
+        teacher_output0 = tf.placeholder(tf.float32, shape=[None, layer_output[0], layer_output[0], 108], name='input_teacher0')
     with tf.name_scope('teacher_output1'):
-        teacher_output1 = tf.placeholder(tf.float32, shape=[None, 8, 8, 950], name='input_teacher1')
+        teacher_output1 = tf.placeholder(tf.float32, shape=[None, layer_output[1], layer_output[1], 150], name='input_teacher1')
     with tf.name_scope('teacher_logits'):
-        teacher_logits = tf.placeholder(tf.float32, shape=[None, 100], name='input_teacher2')
+        teacher_logits = tf.placeholder(tf.float32, shape=[None, n_classes], name='input_teacher2')
    
     with tf.name_scope('labels'):
         labels = tf.placeholder(tf.float32, shape=[None, n_classes], name='labels')
@@ -354,6 +340,8 @@ if __name__ == '__main__':
                                                                       depth=student_depth)
     student_pred = tf.nn.softmax(student_logits)
     teacher_pred = tf.nn.softmax(teacher_logits)
+    
+    # set optimizer with different learning ates
     with tf.name_scope('optimizer0'):
         optimizer0 = tf.train.MomentumOptimizer(learning_rate0, nesterov_momentum, use_nesterov=True)
     with tf.name_scope('optimizer1'):
@@ -361,7 +349,7 @@ if __name__ == '__main__':
     with tf.name_scope('optimizer2'):
         optimizer2 = tf.train.MomentumOptimizer(learning_rate2, nesterov_momentum, use_nesterov=True)
 
-
+    # compute loss
     with tf.name_scope("loss0"):
         loss0 = tf.reduce_mean(tf.nn.l2_loss(student_output0-teacher_output0))
     with tf.name_scope("loss1"):
@@ -372,7 +360,7 @@ if __name__ == '__main__':
     tf.summary.scalar('loss1', loss1)
     tf.summary.scalar('loss2', loss2)
 
-
+    # choose related variables
     gradient_all = optimizer0.compute_gradients(loss2)
     init = [v for (g, v) in gradient_all if 'Student_Initial' in v.name]
     grads_vars0 = [v for (g, v) in gradient_all if 'Block_0' in v.name]
@@ -380,15 +368,17 @@ if __name__ == '__main__':
     grads_vars2 = [v for (g, v) in gradient_all if 'Block_2' in v.name]
     trans = [v for (g, v) in gradient_all if 'Student_Transition_to_classes' in v.name]
     
+    # compute l2 regularization
     with tf.name_scope("l2_loss"):
         l2_loss = tf.add_n([tf.nn.l2_loss(var) for var in init+grads_vars0+grads_vars1+grads_vars2+trans])
     tf.summary.scalar('l2_loss', l2_loss)
     
+    # compute fc loss
     with tf.name_scope("fc_loss"):
-        total_loss2 = loss2+l2_loss
+        total_loss2 = loss2+l2_loss*weight_decay
     tf.summary.scalar('fc_loss', total_loss2)
     
-
+    # compute gradients
     gradient00 = gradient_compute(optimizer0, loss0, init+grads_vars0, '00')
     gradient01 = gradient_compute(optimizer0, loss1, init+grads_vars0, '01')
     gradient02 = gradient_compute(optimizer0, total_loss2, init+grads_vars0, '02')   
@@ -398,18 +388,20 @@ if __name__ == '__main__':
   
     gradient22 = gradient_compute(optimizer2, total_loss2, grads_vars2+trans, '22') 
 
-
+    # gradients placeholders
     grads_holder0 = [(tf.placeholder(tf.float32, shape=g.get_shape()), v) for (g, v) in gradient00]
     grads_holder1 = [(tf.placeholder(tf.float32, shape=g.get_shape()), v) for (g, v) in gradient11]
     grads_holder2 = [(tf.placeholder(tf.float32, shape=g.get_shape()), v) for (g, v) in gradient22]
-
+    
+    # apply gradients
     with tf.name_scope('apply_gradient0'):
         train_op0 = optimizer0.apply_gradients(grads_holder0)
     with tf.name_scope('apply_gradient1'):
         train_op1 = optimizer1.apply_gradients(grads_holder1)
     with tf.name_scope('apply_gradient2'):
         train_op2 = optimizer2.apply_gradients(grads_holder2)
-
+    
+    # compute stduent network accuracy
     with tf.name_scope('accuracy'):
         with tf.name_scope('correct_prediction'):
             correct_prediction = tf.equal(tf.argmax(student_pred, 1), tf.argmax(labels, 1))
@@ -417,6 +409,7 @@ if __name__ == '__main__':
             accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
     tf.summary.scalar('accuracy', accuracy)
     
+    # compute teaccher accuracy for check
     with tf.name_scope('t_accuracy'):
         with tf.name_scope('t_correct_prediction'):
             t_correct_prediction = tf.equal(tf.argmax(teacher_pred, 1), tf.argmax(labels, 1))
@@ -425,19 +418,19 @@ if __name__ == '__main__':
     tf.summary.scalar('t_accuracy', t_accuracy)
 
     merged = tf.summary.merge_all()
-    #gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.70)
+    #gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.70) # set GPU fraction
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     sess = tf.Session(config=config)
     sess.run(tf.global_variables_initializer())
 
-    saver = tf.train.Saver(max_to_keep=5)
+    saver = tf.train.Saver(max_to_keep=2)
     logswriter = tf.summary.FileWriter(logs_path)
     logswriter.add_graph(sess.graph)
     summary_writer = logswriter
     global_step = 0
     print("Reading checkpoints...")
-    ckpt = tf.train.get_checkpoint_state('/home/zhengyu/smodel_100_v7/')
+    ckpt = tf.train.get_checkpoint_state(save_path) # #choose your model folder,  same as save path
     if ckpt and ckpt.model_checkpoint_path:
         global_step = ckpt.model_checkpoint_path.split('/')[-1].split('-')[-1]
         saver.restore(sess, ckpt.model_checkpoint_path)
@@ -445,18 +438,20 @@ if __name__ == '__main__':
     else:
         print('No checkpoint file found, global_step is %s' % global_step)
     
-    global_epoch = int(global_step) // 1562
-    #cnt = global_epoch // 50
-    #lr = float(lr / (2**cnt))
+    global_epoch = int(global_step) // train_params['iterations of one epoch']
+    #cnt = global_epoch // 50 # for automatical learning rate decrease
+    #lr = float(lr / (2**cnt)) # decrease every 50 epochs, divide by 2
     total_start_time = time.time()
     #counter = global_epoch % 50
 
-    for epoch in range(global_epoch, global_epoch+100):
+    for epoch in range(global_epoch, total_epoch):
         print("\n", '-' * 30, "Train epoch: %d" % epoch, '-' * 50, '\n')
         start_time = time.time()
-        #if counter == 50:
-         #   lr = float(lr / 2)
-        print("Decrease learning rate, lr0 = %s, lr1 = %s, lr2 = %s" % (str(args.lr0),str(args.lr1),str(args.lr2)))
+        if epoch in lr_decay:#counter == 50:
+            lr0 = float(lr0 / 2)
+            lr1 = float(lr1 / 2)
+            lr3 = float(lr2 / 2)
+        print("Decrease learning rate, lr0 = %s, lr1 = %s, lr2 = %s" % (str(lr0),str(lr1),str(lr2)))
         print("Training...")
 
         block0_loss = []
@@ -465,13 +460,12 @@ if __name__ == '__main__':
         accuracy_s = []
         accuracy_v = []
         
-        for i in range(0, 1562):
-            batch = data.next_batch(batch_size,True)
+        for i in range(0, train_params['iterations of one epoch']):
+            batch = data.next_batch(train_params['batch_size'],True)
 
             images, label, block0, block1, logits = batch
-            label = labels_to_one_hot(label)
-            feed_dict = {student_input: images, learning_rate0: args.lr0, learning_rate1: args.lr1,
-                         learning_rate2: args.lr2, is_training: True, labels: label,
+            feed_dict = {student_input: images, learning_rate0: lr0, learning_rate1: lr1,
+                         learning_rate2: lr2, is_training: True, labels: label,
                          teacher_output0: block0, teacher_output1: block1, teacher_logits: logits}
             
             fetch = [gradient00, gradient01, gradient02, gradient11, gradient12, gradient22, 
@@ -486,7 +480,7 @@ if __name__ == '__main__':
             avg_gradient1 = np.asarray(avg_gradient1)
             avg_gradient2 = np.asarray(avg_gradient2)
             
-            grads_sum = {learning_rate0: args.lr0, learning_rate1: args.lr1, learning_rate2: args.lr2}
+            grads_sum = {learning_rate0: lr0, learning_rate1: lr1, learning_rate2: lr2}
             
             for t0 in range(len(grads_holder0)):
                 k0 = grads_holder0[t0][0]
@@ -502,7 +496,6 @@ if __name__ == '__main__':
                 k2 = grads_holder2[t2][0]
                 if k2 is not None:
                     grads_sum[k2] = avg_gradient2[t2]
-
 
             sess.run([train_op0, train_op1, train_op2], feed_dict=grads_sum)
 
@@ -521,17 +514,15 @@ if __name__ == '__main__':
                 tf.Summary.Value(
                     tag='accuracy_s_per_batch', simple_value=float(acc))
             ])
-            logswriter.add_summary(summary, (epoch + 1) * 1562 + i)
+            logswriter.add_summary(summary, (epoch + 1) * train_params['iterations of one epoch'] + i)
             
-            logswriter.add_summary(summ, (epoch + 1) * 1562 + i)
+            logswriter.add_summary(summ, (epoch + 1) * train_params['iterations of one epoch'] + i)
             print 'epoch:%d--step--%d: student accuracy: %f; l2_0: %f; l2_1:%f; l2_3:%f; t-acc:%f' % (epoch, i, acc, x, y, z, t_acc)
             print '-----------------'
         
         num_val = val.num_examples
         for i in range(num_val // 200):
             batch = val.next_batch(200,False)
-            #print (type(batch[1]), batch[1].shape)
-            #test_label = labels_to_one_hot(batch[1])
             feed_dict_v = {
                 student_input: batch[0],
                 labels: batch[1],
@@ -562,8 +553,8 @@ if __name__ == '__main__':
         ])
         logswriter.add_summary(summary, epoch)
         
-        saver.save(sess, save_path+'model.ckpt', global_step=1562*(epoch+1))
-        print ("saved model at step %d" % (1562*(epoch+1)))
+        saver.save(sess, save_path+'model.ckpt', global_step=train_params['iterations of one epoch']*(epoch+1))
+        print ("saved model at step %d" % (train_params['iterations of one epoch']*(epoch+1)))
         #counter += 1
         time_per_epoch = time.time() - start_time
         seconds_left = int((10 - epoch) * time_per_epoch)
