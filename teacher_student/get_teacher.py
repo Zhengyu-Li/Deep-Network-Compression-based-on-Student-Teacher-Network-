@@ -2,13 +2,17 @@ import tensorflow as tf
 import pickle
 import h5py
 import cPickle
+import gzip
+from tensorflow.python.platform import gfile
 import numpy as np
 import os
+import argparse
 from data_providers.utils import get_data_provider_by_name
-n_classes = 100
+n_classes = 10
+input_size = 28
 
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
+os.environ["CUDA_VISIBLE_DEVICES"]="1"
 
 train_params_cifar = {
     'batch_size': 32,
@@ -22,6 +26,24 @@ train_params_cifar = {
     'normalization': 'by_chanels',  # None, divide_256, divide_255, by_chanels
 }
 
+train_params_mnist = {
+    'batch_size': 64,
+    'iterations of one epoch': 938,
+    'initial_learning_rate': 0.1,
+    'reduce_lr_epoch_1': 150,
+    'reduce_lr_epoch_2': 225,
+    'validation_set': True,
+    'validation_split': None,  # you may set it 6000 as in the paper
+    'shuffle': 'every_epoch',  # shuffle dataset every epoch or not
+    'normalization': 'by_chanels',
+}
+
+def get_train_params_by_name(name):
+    if name in ['C10', 'C10+', 'C100', 'C100+']:
+        return train_params_cifar
+    if name == 'MNIST':
+        return train_params_mnist
+
 def labels_to_one_hot(labels):
     """Convert 1D array of labels to one hot representation
 
@@ -32,23 +54,70 @@ def labels_to_one_hot(labels):
     new_labels[range(labels.shape[0]), labels] = np.ones(labels.shape)
     return new_labels
 
-def read_cifar(filenames):
-    labels_key = b'fine_labels'
+
+def _read32(bytestream):
+  dt = np.dtype(np.uint32).newbyteorder('>')
+  return np.frombuffer(bytestream.read(4), dtype=dt)[0]
+
+
+def extract_images(f):
+  print('Extracting', f.name)
+  with gzip.GzipFile(fileobj=f) as bytestream:
+    magic = _read32(bytestream)
+    if magic != 2051:
+      raise ValueError('Invalid magic number %d in MNIST image file: %s' %
+                       (magic, f.name))
+    num_images = _read32(bytestream)
+    rows = _read32(bytestream)
+    cols = _read32(bytestream)
+    buf = bytestream.read(rows * cols * num_images)
+    data = np.frombuffer(buf, dtype=np.uint8)
+    data = data.reshape(num_images, rows, cols, 1)
+    return data
+
+
+def extract_labels(f, num_classes=10):
+  print('Extracting', f.name)
+  with gzip.GzipFile(fileobj=f) as bytestream:
+    magic = _read32(bytestream)
+    if magic != 2049:
+      raise ValueError('Invalid magic number %d in MNIST label file: %s' %
+                       (magic, f.name))
+    num_items = _read32(bytestream)
+    buf = bytestream.read(num_items)
+    labels = np.frombuffer(buf, dtype=np.uint8)
+    return labels
+
+def read_cifar(filenames, classes):
+
+    if classes == 10:
+        labels_key = b'labels'
+    elif classes == 100:
+        labels_key = b'fine_labels'
+
 
     images_res = []
     labels_res = []
-    #for fname in filenames:
-    with open(filenames, 'rb') as f:
-        images_and_labels = pickle.load(f)  # , encoding='bytes'
-    images = images_and_labels[b'data']
-    images = images.reshape(-1, 3, 32, 32)
-    images = images.swapaxes(1, 3).swapaxes(1, 2)
-    images_res.append(images)
-    labels_res.append(images_and_labels[labels_key])
+    for fname in filenames:
+        with open(fname, 'rb') as f:
+            images_and_labels = pickle.load(f)#, encoding='bytes'
+        images = images_and_labels[b'data']
+        images = images.reshape(-1, 3, 32, 32)
+        images = images.swapaxes(1, 3).swapaxes(1, 2)
+        images_res.append(images)
+        labels_res.append(images_and_labels[labels_key])
     images_res = np.vstack(images_res)
     labels_res = np.hstack(labels_res)
+
     labels_res = labels_to_one_hot(labels_res)
-    #print labels_res[1]
+    return images_res, labels_res
+
+def read_mnist(data, truth):
+    with gfile.Open(data, 'rb') as f:
+        images_res = extract_images(f)
+    with gfile.Open(truth, 'rb') as f:
+        labels_res = extract_labels(f)
+    labels_res = labels_to_one_hot(labels_res)
     return images_res, labels_res
 
 def measure_mean_and_std(images):
@@ -90,7 +159,7 @@ TF_VERSION = float('.'.join(tf.__version__.split('.')[:2]))
 class DenseNet:
     def __init__(self, growth_rate=12, depth=100,
                  total_blocks=3, keep_prob=0.8,
-                 weight_decay=1e-4, nesterov_momentum=0.9, model_type='DenseNet-BC', dataset='C100',
+                 weight_decay=1e-4, nesterov_momentum=0.9, model_type='DenseNet-BC', dataset='MNIST',
                  reduction=0.5,
                  bc_mode=True,
                  **kwargs):
@@ -120,8 +189,8 @@ class DenseNet:
                 reduction or not.
         """
       
-        self.data_shape = (32, 32, 3)
-        self.n_classes = 100
+        self.data_shape = (input_size, input_size, 1)
+        self.n_classes = n_classes
         self.depth = depth
         self.growth_rate = growth_rate
         # how many features will be received after first convolution
@@ -158,7 +227,7 @@ class DenseNet:
 
     def _initialize_session(self):
         """Initialize session, variables, saver"""
-        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8)
+        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.5)
         config = tf.ConfigProto(gpu_options = gpu_options)
         # restrict model GPU memory utilization to min required
         #config = tf.ConfigProto()
@@ -367,10 +436,10 @@ class DenseNet:
         return tf.get_variable(name, initializer=initial)
 
     def _build_graph(self):
-    '''
-    Make sure the structure and name are same as in pretrained model.
-    You can choose other intermediate outputs from teacher for guiding the student.
-    '''
+        '''
+        Make sure the structure and name are same as in pretrained model.
+        You can choose other intermediate outputs from teacher for guiding the student.
+        '''
         growth_rate = self.growth_rate
         layers_per_block = self.layers_per_block
         # first - initial 3 x 3 conv to first_output_features
@@ -435,42 +504,131 @@ class DenseNet:
         return out0, out1, out2, out3
 
 if __name__ == '__main__':
-    img, labels = read_cifar('./teacher_student/cifar100/cifar-100-python/train') #cifar-100 training data path
-    img = normalize_images(img, 'by_chanels')
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--model_type', '-m', type=str, choices=['DenseNet', 'DenseNet-BC'],
+        default='DenseNet-BC',
+        help='What type of model to use')
+    parser.add_argument(
+        '--growth_rate', '-k', type=int, choices=[12, 24, 40],
+        default=12,
+        help='Grows rate for every layer, '
+             'choices were restricted to used in paper')
+    parser.add_argument(
+        '--depth', '-d', type=int, default=100,
+        help='Depth of whole network, restricted to paper choices')
+    parser.add_argument(
+        '--dataset', '-ds', type=str,
+        choices=['C10', 'C100', 'MNIST'],
+        default='C10',
+        help='What dataset should be used')
+    parser.add_argument(
+        '--data_file', type=str, default='./mnist/', help='The folder contains MNIST dataset')
+    parser.add_argument(
+        '--save_folder', type=str, default='mnist', help='The folder to save files')
+    args = parser.parse_args()
+    
+    train_params = get_train_params_by_name(args.dataset)
+
+    print("load model...")
     model = DenseNet()
-    model_path = './teacher_student/saves/' #pretrained model folder
+    #pretrained model folder
+    model_path = 'saves/%s_growth_rate=%d_depth=%d_dataset_%s/' %(args.model_type, args.growth_rate, args.depth, args.dataset)
+    
     model.load_model(model_path)
-    print ("save file...")
-    
-    block0, block1, block2, logit = model.test(img[0:2500], labels[0:2500])
-    for i in range(2500, 50000, 2500):
-        out0, out1, out2, log = model.test(img[i:i+2500], labels[i:i+2500])
-        block0 = np.concatenate((block0, out0)) #optional
-        block1 = np.concatenate((block1, out1)) #optional
-        block2 = np.concatenate((block2, out2)) #optional
-        logit = np.concatenate((logit, log)) #optional
+
+    print ("start saving...")
+
+    if (args.dataset == 'C100'):
+        n_classes = 100
+        input_size = 32
+        train_img, train_labels = read_cifar(['./cifar100/cifar-100-python/train'], 100) #cifar-100 training data path
+        train_img = normalize_images(train_img, train_params['normalization'])
+        block0, block1, block2, logit = model.test(img[0:2500], labels[0:2500])
+        for i in range(2500, 50000, 2500):
+            out0, out1, out2, log = model.test(img[i:i+2500], labels[i:i+2500])
+            block0 = np.concatenate((block0, out0)) #optional
+            block1 = np.concatenate((block1, out1)) #optional
+            block2 = np.concatenate((block2, out2)) #optional
+            logit = np.concatenate((logit, log)) #optional
         print block0.shape, block1.shape, block2.shape, logit.shape
+        f = h5py.File('./%s/train_data.h5' %(args.save_folder), 'w') # saved file path
+        f['images'] = train_img
+        f['labels'] = train_labels
+        f['block0'] = block0 #optional
+        f['block1'] = block1 #optional
+        f['block2'] = block2 #optional
+        f['logits'] = logit #optional
+        f.close()
+        print ("training data---finished.")
+        
+        test_img, test_labels = read_cifar(['./cifar100/cifar-100-python/test'], 100) #cifar-100 training data path
+        test_img = normalize_images(test_img, train_params[normalization])
+        f = h5py.File('./%s/test_data.h5' %(args.save_folder), 'w') # saved file path
+        f['images'] = test_img
+        f['labels'] = test_labels
+        f.close()
+        print ("testing data---finished.")
 
-    f = h5py.File('./train_data.h5', 'w') # saved file path
-    f['images'] = img
-    f['labels'] = labels
-    f['block0'] = block0 #optional
-    f['block1'] = block1 #optional
-    f['block2'] = block2 #optional
-    f['logits'] = logit #optional
-    f.close()
-    print ("finished.")
+    if (args.dataset == 'C10'):
+        n_classes = 10
+        input_size = 32
+        train_filenames = [os.path.join('./cifar10/cifar-10-batches-py/','data_batch_%d' % i) for i in range(1, 6)]
+        train_img, train_labels = read_cifar(train_filenames, 10) #cifar-10 training data path
+        train_img = normalize_images(train_img, train_params['normalization'])
+        block0, block1, block2, logit = model.test(train_img[0:2500], train_labels[0:2500])
+        for i in range(2500, 50000, 2500):
+            out0, out1, out2, log = model.test(train_img[i:i+2500], train_labels[i:i+2500])
+            block0 = np.concatenate((block0, out0)) #optional
+            block1 = np.concatenate((block1, out1)) #optional
+            block2 = np.concatenate((block2, out2)) #optional
+            logit = np.concatenate((logit, log)) #optional
+        print block0.shape, block1.shape, block2.shape, logit.shape
+        f = h5py.File('./%s/train_data.h5' %(args.save_folder), 'w') # saved file path
+        f['images'] = train_img
+        f['labels'] = train_labels
+        f['block0'] = block0 #optional
+        f['block1'] = block1 #optional
+        f['block2'] = block2 #optional
+        f['logits'] = logit #optional
+        f.close()
+        print ("training data---finished.")
+        
+        test_img, test_labels = read_cifar(['./cifar10/cifar-10-batches-py/test_batch'], 10)
+        test_img = normalize_images(test_img, train_params['normalization'])
+        f = h5py.File('./%s/test_data.h5' %(args.save_folder), 'w') # saved file path
+        f['images'] = test_img
+        f['labels'] = test_labels
+        f.close()
+        print ("testing data---finished.")
 
-    test_img, test_labels = read_cifar('./teacher_student/cifar100/cifar-100-python/test') #cifar-100 training data path
-    test_img = normalize_images(test_img, 'by_chanels')
-    f = h5py.File('./test_data.h5', 'w') # saved file path
-    f['images'] = test_img
-    f['labels'] = test_labels
-    f.close()
-    print ("finished.")   
-    
+    if (args.dataset == 'MNIST'):
+        n_classes = 10
+        input_size = 28
+        train_img, train_labels = read_mnist('./mnist/train-images-idx3-ubyte.gz', './mnist/train-labels-idx1-ubyte.gz')
+        train_img = normalize_images(train_img, train_params['normalization'])
+        block0, block1, block2, logit = model.test(train_img[0:2500], train_labels[0:2500])
+        for i in range(2500, 60000, 2500):
+            out0, out1, out2, log = model.test(train_img[i:i+2500], train_labels[i:i+2500])
+            block0 = np.concatenate((block0, out0)) #optional
+            block1 = np.concatenate((block1, out1)) #optional
+            block2 = np.concatenate((block2, out2)) #optional
+            logit = np.concatenate((logit, log)) #optional
+        print block0.shape, block1.shape, block2.shape, logit.shape
+        f = h5py.File('./%s/train_data.h5' %(args.save_folder), 'w') # saved file path
+        f['images'] = train_img
+        f['labels'] = train_labels
+        f['block0'] = block0 #optional
+        f['block1'] = block1 #optional
+        f['block2'] = block2 #optional
+        f['logits'] = logit #optional
+        f.close()
+        print ("training data---finished.")     
 
-
-
-
-    
+        test_img, test_labels = read_mnist('./mnist/t10k-images-idx3-ubyte.gz', './mnist/t10k-labels-idx1-ubyte.gz')
+        test_img = normalize_images(test_img, train_params['normalization'])
+        f = h5py.File('./%s/test_data.h5' %(args.save_folder), 'w') # saved file path
+        f['images'] = test_img
+        f['labels'] = test_labels
+        f.close()
+        print ("testing data---finished.")
