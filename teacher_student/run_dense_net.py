@@ -5,7 +5,7 @@ from data_providers.utils import get_data_provider_by_name
 
 train_params_cifar = {
     'batch_size': 64,
-    'iterations of one epoch': 1562,
+    'iterations of one epoch': 782,
     'initial_learning_rate': 0.1,
     'reduce_lr_epoch_1': 150,  # epochs * 0.5
     'reduce_lr_epoch_2': 225,  # epochs * 0.75
@@ -28,11 +28,26 @@ train_params_svhn = {
 }
 
 
+train_params_mnist = {
+    'batch_size': 64,
+    'iterations of one epoch': 938,
+    'initial_learning_rate': 0.1,
+    'reduce_lr_epoch_1': 150,
+    'reduce_lr_epoch_2': 225,
+    'validation_set': True,
+    'validation_split': None,  # you may set it 6000 as in the paper
+    'shuffle': 'every_epoch',  # shuffle dataset every epoch or not
+    'normalization': 'by_chanels',
+}
+
+
 def get_train_params_by_name(name):
     if name in ['C10', 'C10+', 'C100', 'C100+']:
         return train_params_cifar
     if name == 'SVHN':
         return train_params_svhn
+    if name == 'MNIST':
+        return train_params_mnist
 
 
 if __name__ == '__main__':
@@ -61,7 +76,7 @@ if __name__ == '__main__':
         help='Depth of whole network, restricted to paper choices')
     parser.add_argument(
         '--dataset', '-ds', type=str,
-        choices=['C10', 'C10+', 'C100', 'C100+', 'SVHN'],
+        choices=['C10', 'C10+', 'C100', 'C100+', 'SVHN', 'MNIST'],
         default='C100',
         help='What dataset should be used')
     parser.add_argument(
@@ -108,7 +123,7 @@ if __name__ == '__main__':
 
     if not args.keep_prob:
         if args.dataset in ['C10', 'C100', 'SVHN']:
-            args.keep_prob = 0.5
+            args.keep_prob = 0.8
         else:
             args.keep_prob = 1.0
     if args.model_type == 'DenseNet':
