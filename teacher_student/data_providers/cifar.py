@@ -134,7 +134,7 @@ class CifarDataProvider(DataProvider):
         """
         self._save_path = save_path
         self.one_hot = one_hot
-        #download_data_url(self.data_url, self.save_path)
+        download_data_url(self.data_url, self.save_path)
         train_fnames, test_fnames = self.get_filenames(self.save_path)
 
         # add train and validations datasets
