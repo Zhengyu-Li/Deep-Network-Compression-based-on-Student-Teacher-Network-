@@ -49,7 +49,7 @@ class ImagesDataSet(DataSet):
         shuffled_labels = labels[rand_indexes]
         shuffled_block0 = block0[rand_indexes]
         shuffled_block1 = block1[rand_indexes]
-        #shuffled_block2 = block2[rand_indexes]
+        shuffled_block2 = block2[rand_indexes]
         shuffled_logits = logits[rand_indexes] #add
         return shuffled_images, shuffled_labels, shuffled_block0, shuffled_block1, shuffled_block2, shuffled_logits
 
