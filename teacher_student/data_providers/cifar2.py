@@ -5,7 +5,6 @@ import pickle
 import random
 import numpy as np
 from .data_providers2 import ImagesDataSet, DataProvider
-from .downloader import download_data_url
 
 '''
 Please note that, all the variables named with "block0", "block1" or "logits" are intermediate outputs collected from teacher and related with our training strategy.
@@ -46,7 +45,7 @@ def read_cifar(filenames):
     labels = f['labels'][:]
     block0 = f['block0'][:]
     block1 = f['block1'][:]
-   # block2 = f['block2'][:]
+    block2 = f['block2'][:]
     logits = f['logits'][:]
     f.close()
     return images, labels, block0, block1, logits
@@ -85,29 +84,36 @@ class CifarDataSet(ImagesDataSet):
         self.labels = labels
         self.block0 = block0
         self.block1 = block1
-        #self.block2 = block2
+        self.block2 = block2
         self.logits = logits #add
         self.n_classes = n_classes
         self.augmentation = augmentation
         self.normalization = normalization
-        self.images = self.normalize_images(images, self.normalization)
+        self.images = images
+        self._train_batch_counter = 0
+        self._test_batch_counter = 0
         self.start_new_epoch()
 
-    def start_new_epoch(self):
-        self._batch_counter = 0
-        if self.shuffle_every_epoch:
-            images, labels, block0_out, block1_out,  logits_out = self.shuffle_images_and_labels(
-                self.images, self.labels, self.block0, self.block1, self.logits) # block2_out
+    def start_new_epoch(self, is_training=True):
+        if (is_training==True):
+            self._train_batch_counter = 0
+            if self.shuffle_every_epoch:
+                images, labels, block0_out, block1_out,  block2_out, logits_out = self.shuffle_images_and_labels( \
+                    self.images, self.labels, self.block0, self.block1, self.block2, self.logits) # block2_out
+            else:
+                images, labels, block0_out, block1_out,  block2_out, logits_out = \
+                    self.images, self.labels,  self.block0, self.block1, self.block2, self.logits #block2_out
         else:
-            images, labels, block0_out, block1_out,  logits_out = \
-                self.images, self.labels,  self.block0, self.block1, self.logits #block2_out
+            self._test_batch_counter = 0
+            images, labels, block0_out, block1_out,  block2_out, logits_out = \
+                self.images, self.labels,  self.block0, self.block1, self.block2, self.logits #block2_out
         if self.augmentation:
             images = augment_all_images(images, pad=4)
         self.epoch_images = images
         self.epoch_labels = labels
         self.epoch_block0 = block0_out
         self.epoch_block1 = block1_out
-        #self.epoch_block2 = block2_out
+        self.epoch_block2 = block2_out
         self.epoch_logits = logits_out #add
 
     @property
@@ -115,26 +121,39 @@ class CifarDataSet(ImagesDataSet):
         return self.labels.shape[0]
 
     def next_batch(self, batch_size, is_training):
-        index = np.random.randint(50000, size=batch_size)
         if is_training==True:
-            images_slice = self.epoch_images[index]
-            labels_slice = self.epoch_labels[index]
-            block0_slice = self.epoch_block0[index]
-            block1_slice = self.epoch_block1[index]
-            #block2_slice = self.epoch_block2[index]
-            logits_slice = self.epoch_logits[index]
+            start = self._train_batch_counter * batch_size
+            end = (self._train_batch_counter + 1) * batch_size
+            self._train_batch_counter += 1
+            print("train_counter:%d\n",self._train_batch_counter)	
+            if (self._train_batch_counter>=50000//batch_size):
+                end = -1
+                self.start_new_epoch(is_training=True)
+
+            images_slice = self.epoch_images[start: end]
+            labels_slice = self.epoch_labels[start: end]
+            block0_slice = self.epoch_block0[start: end]
+            block1_slice = self.epoch_block1[start: end]
+            block2_slice = self.epoch_block2[start: end]
+            logits_slice = self.epoch_logits[start: end]
+
         else:
-            start = self._batch_counter * batch_size
-            end = (self._batch_counter + 1) * batch_size
-            self._batch_counter += 1
+            start = self._test_batch_counter * batch_size
+            end = (self._test_batch_counter + 1) * batch_size
+            self._test_batch_counter += 1
+            print("test_counter:%d\n",self._test_batch_counter) 
+            if (self._test_batch_counter>=10000//batch_size):
+                end = -1
+                self.start_new_epoch(is_training=False)
+
             images_slice = self.epoch_images[start: end]
             labels_slice = self.epoch_labels[start: end]
             block0_slice = 0
             block1_slice = 0
-            #block2_slice = 0
+            block2_slice = 0
             logits_slice = 0
 
-        return images_slice, labels_slice, block0_slice, block1_slice, logits_slice #block2_slice
+        return images_slice, labels_slice, block0_slice, block1_slice, block2_slice, logits_slice
 
 class CifarDataProvider(DataProvider):
     """Abstract class for cifar readers"""
@@ -164,43 +183,43 @@ class CifarDataProvider(DataProvider):
         """
         self._save_path = save_path
         self.one_hot = one_hot
-        #download_data_url(self.data_url, self.save_path)
+
         train_fnames, test_fnames = self.get_filenames(self.save_path)
 
         # add train and validations datasets
-        images, labels, block0, block1, logits = read_cifar(train_fnames)
+        images, labels, block0, block1, block2, logits = read_cifar(train_fnames)
         #block0, block1, block2 = self.read_teacher_output(teacher_output)
         print type(images), images.shape
         if validation_set is not None and validation_split is not None:
             split_idx = int(images.shape[0] * (1 - validation_split))
             self.train = CifarDataSet(
                 images=images[:split_idx], labels=labels[:split_idx], block0=block0[:split_idx],
-                block1=block1[:split_idx], logits=logits[:split_idx],
+                block1=block1[:split_idx], block2=block2[:split_idx], logits=logits[:split_idx],
                 n_classes=self.n_classes, shuffle=shuffle,
                 normalization=normalization,
                 augmentation=self.data_augmentation) #block2=block2[split_idx:]
             self.validation = CifarDataSet(
                 images=images[split_idx:], labels=labels[split_idx:], block0=block0[split_idx:],
-                block1=block1[split_idx:],  logits=logits[:split_idx],
+                block1=block1[split_idx:], block2=block2[:split_idx], logits=logits[:split_idx],
                 n_classes=self.n_classes, shuffle=shuffle,
                 normalization=normalization,
                 augmentation=self.data_augmentation) #block2=block2[split_idx:]
         else:
             self.train = CifarDataSet(
                 images=images, labels=labels, block0=block0,
-                block1=block1, logits=logits,
+                block1=block1, block2=block2, logits=logits,
                 n_classes=self.n_classes, shuffle=shuffle,
                 normalization=normalization,
-                augmentation=self.data_augmentation) # block2
+                augmentation=self.data_augmentation)
 
         # add test set
         imagest, labelst = self.read_test(test_fnames)
         self.test = CifarDataSet(
             images=imagest, labels=labelst, block0=None,
-            block1=None,  logits=None,
+            block1=None, block2=None, logits=None,
             n_classes=self.n_classes, shuffle=None,
             normalization=normalization,
-            augmentation=False) # #block2
+            augmentation=False)
 
         if validation_set and not validation_split:
             self.validation = self.test
@@ -208,15 +227,8 @@ class CifarDataProvider(DataProvider):
     @property
     def save_path(self):
         if self._save_path is None:
-            self._save_path = os.path.join("./teacher_student/", 'cifar%d' % self.n_classes)#tempfile.gettempdir()
+            self._save_path = './cifar%d' % self.n_classes #tempfile.gettempdir()
         return self._save_path
-
-    @property
-    def data_url(self):
-        """Return url for downloaded data depends on cifar class"""
-        data_url = ('http://www.cs.toronto.edu/'
-                    '~kriz/cifar-%d-python.tar.gz' % self.n_classes)
-        return data_url
 
     @property
     def data_shape(self):
@@ -235,7 +247,7 @@ class CifarDataProvider(DataProvider):
         images = f['images'][:]
         labels = f['labels'][:]
         f.close()
-        labels_res = self.labels_to_one_hot(labels)        
+        #labels_res = self.labels_to_one_hot(labels)        
         return images, labels_res
 
 
@@ -245,6 +257,16 @@ class Cifar100DataProvider2(CifarDataProvider):
 
     def get_filenames(self, save_path):
         sub_save_path = os.path.join(save_path, 'cifar-100-python')
+        train_filenames = 'train_data.h5' #change to your training data file
+        test_filenames = 'test_data.h5'  #change to your testing data file
+        return train_filenames, test_filenames 
+
+class Cifar10DataProvider2(CifarDataProvider):
+    _n_classes = 10
+    data_augmentation = False
+
+    def get_filenames(self, save_path):
+        sub_save_path = os.path.join(save_path, 'cifar10')
         train_filenames = 'train_data.h5' #change to your training data file
         test_filenames = 'test_data.h5'  #change to your testing data file
         return train_filenames, test_filenames 
