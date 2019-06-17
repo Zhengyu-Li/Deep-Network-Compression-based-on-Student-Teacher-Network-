@@ -3,15 +3,13 @@
 This guideline is to guide you to train/test the original DenseNet model or the Student-Teacher model. 
 All of our codes are based on Tensorflow and Python.
 The file organization is shown below.  
-**teacher_student**  
-----cifar100  
---------cifar-100-python  
-------------train(cifar100 training data)  
-------------test(cifar100 test data)  
+**teacher_student**   
 ----data_providers  
 --------cifar.py(for original training data)  
+--------mnist.py(for original MNIST data training)  
 --------base_provider.py(for original training data)  
 --------cifar2.py(for intermediate outputs)  
+--------mnist2.py(for intermediate outputs)  
 --------data_providers2.py(for intermediate outputs)  
 ----models  
 --------dense_net.py  
@@ -45,7 +43,7 @@ Our codes (teacher_student folder) are based on [Illarion Khlestov's implementat
 - Start a new train. The model will be saved in "saves" folder. The logs will be saved in "log" folder. Example run: 
   ```sh
   $ python run_dense_net.py --train \
-                          --dataset=C100org \
+                          --dataset=C100 \
                           --epoch=300 \
                           --growth_rate=12 \
                           --depth=100 
@@ -54,7 +52,7 @@ Our codes (teacher_student folder) are based on [Illarion Khlestov's implementat
 - Test model. Example run:
   ```sh
   python run_dense_net.py --test \
-                          --dataset=C100org \
+                          --dataset=C100 \
                           --epoch=300 \
                           --growth_rate=12 \
                           --depth=100 
