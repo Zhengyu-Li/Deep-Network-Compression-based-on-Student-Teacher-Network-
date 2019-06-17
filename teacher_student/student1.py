@@ -5,16 +5,16 @@ from datetime import timedelta
 
 import numpy as np
 import tensorflow as tf
-from data_providers.utils import get_data_provider_by_name
+from data_providers.utils2 import get_data_provider_by_name
 
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   
-os.environ["CUDA_VISIBLE_DEVICES"]="1" # here 0 refers to GPU 0
+os.environ["CUDA_VISIBLE_DEVICES"]="0" # here 0 refers to GPU 0
 
-logs_path = './logs/smodel/' #path to save summaries
-save_path = './saves/smodel/' #path to save models
+logs_path = './logs/smodel1/mnist/' #path to save summaries
+save_path = './saves/smodel1/mnist/' #path to save models
 train_params = {
-    'batch_size': 64,
-    'iterations of one epoch': 1562,
+    'batch_size': 32,
+    'iterations of one epoch': 1875,
     'initial_learning_rate': 2e-5,
     'validation_set': True,
     'validation_split': None,  # None or float
@@ -88,7 +88,7 @@ def composite_function(_input, out_features, is_training, kernel_size=3, keep_pr
         output = dropout(output, is_training, keep_prob)
     return output
 
-def bottleneck(_input, out_features, is_training, keep_prob=0.5):
+def bottleneck(_input, out_features, is_training, keep_prob=0.8):
     with tf.variable_scope("bottleneck"):
         output = batch_norm(_input, is_training=is_training)
         output = tf.nn.relu(output)
@@ -254,15 +254,15 @@ def my_gradient(g0, g1, g2):
     return g2_copy
 
 
-data_provider = get_data_provider_by_name('C100', train_params)
+data_provider = get_data_provider_by_name('MNIST', train_params) #change to your dataset
 data_shape = data_provider.data_shape
-n_classes = 100
+layer_output =  [14, 7] #if choose CIFAR, set it to [16, 8]
+n_classes = 10 #change according to the dataset
 data = data_provider.train
 student_depth = 16 #change to your model depth
 nesterov_momentum = 0.9
-batch_size = 64 #set your batch size
-weight_decay = 1e-4
-lr = float(2e-5)
+lr_decay = [140,210,280,350,420,490,560,630,700,770,840] #the epoch to reduce learning rate
+lr = train_params['initial_learning_rate']
 val = data_provider.test
 total_epoch = 700 # set the number of epochs you want to train 
 
@@ -275,11 +275,11 @@ if __name__ == '__main__':
     with tf.name_scope('learning_rate'):
         learning_rate = tf.placeholder(tf.float32, shape=[], name='learning_rate')
     with tf.name_scope('teacher_output0'):
-        teacher_output0 = tf.placeholder(tf.float32, shape=[None, 16, 16, 108], name='input_student')
+        teacher_output0 = tf.placeholder(tf.float32, shape=[None, layer_output[0], layer_output[0], 108], name='input_student')
     with tf.name_scope('teacher_output1'):
-        teacher_output1 = tf.placeholder(tf.float32, shape=[None, 8, 8, 150], name='input_student')
+        teacher_output1 = tf.placeholder(tf.float32, shape=[None, layer_output[1], layer_output[1], 150], name='input_student')
     with tf.name_scope('teacher_output2'):
-        teacher_output2 = tf.placeholder(tf.float32, shape=[None, 100], name='input_student')
+        teacher_output2 = tf.placeholder(tf.float32, shape=[None, n_classes], name='input_student')
     with tf.name_scope('labels'):
         labels = tf.placeholder(tf.float32, shape=[None, n_classes], name='labels')
     with tf.name_scope('is_training'):
@@ -364,18 +364,18 @@ if __name__ == '__main__':
     tf.summary.scalar('t_accuracy', t_accuracy)
 
     merged = tf.summary.merge_all()
-    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.70) #set gpu fraction
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.50) #set gpu fraction
     config=tf.ConfigProto(gpu_options=gpu_options)
     sess = tf.Session(config=config)
     sess.run(tf.global_variables_initializer())
 
-    saver = tf.train.Saver()
+    saver = tf.train.Saver(max_to_keep=5)
     logswriter = tf.summary.FileWriter(logs_path)
     logswriter.add_graph(sess.graph)
     summary_writer = logswriter
     global_step = 0
     print("Reading checkpoints...")
-    ckpt = tf.train.get_checkpoint_state('./saves/smodel/') #choose your model folder,  same as save path
+    ckpt = tf.train.get_checkpoint_state(save_path) #choose your model folder,  same as save path
     if ckpt and ckpt.model_checkpoint_path:
         global_step = ckpt.model_checkpoint_path.split('/')[-1].split('-')[-1]
         saver.restore(sess, ckpt.model_checkpoint_path)
@@ -384,18 +384,18 @@ if __name__ == '__main__':
         print('No checkpoint file found, global_step is %s' % global_step)
 
     # compute learning rate when continue training
-    global_epoch = int(global_step) // 1562
-    cnt =  global_epoch // 30
-    lr = float(lr / (2**cnt))
+    global_epoch = int(global_step) // train_params['iterations of one epoch']
+    #cnt =  global_epoch // 30 # automatical learning rate decrease, every 3 epochs
+    #lr = float(lr / (2**cnt)) # ivide by 2
     total_start_time = time.time()
-    counter = global_epoch % 30
+    #counter = global_epoch % 30s
 
     for epoch in range(global_epoch, total_epoch):
         print("\n", '-' * 30, "Train epoch: %d" % epoch, '-' * 30, '\n')
         start_time = time.time()
-        if counter == 30:
+        if epoch in lr_decay:
             lr = float(lr / 2)
-            counter = 0
+            #counter = 0
         print("Decrease learning rate, new lr = %s" % str(lr))
         print("Training...")
 
@@ -405,13 +405,13 @@ if __name__ == '__main__':
         accuracy_s = []
         accuracy_v = []
         
-        for i in range(0, 1562):
-            batch = data.next_batch(batch_size)
+        for i in range(0, train_params['iterations of one epoch']):
+            batch = data.next_batch(train_params['batch_size'], is_training=True)
 
-            images, label, block0, block1, block2 = batch
+            images, label, block0, block1, block2, logits = batch
 
             feed_dict = {student_input: images, learning_rate: lr, is_training: True, labels: label,
-                         teacher_output0: block0, teacher_output1: block1, teacher_output2: block2}
+                         teacher_output0: block0, teacher_output1: block1, teacher_output2: logits}
          
             a, b, c, d, summ, x,y,z = sess.run([gradient0, gradient1, gradient2, accuracy, merged, loss0,loss1,loss2], feed_dict=feed_dict)
         
@@ -439,9 +439,9 @@ if __name__ == '__main__':
                 tf.Summary.Value(
                     tag='accuracy_s_per_batch', simple_value=float(d))
             ])
-            logswriter.add_summary(summary, (epoch + 1) * 1562 + i)
+            logswriter.add_summary(summary, (epoch + 1) * train_params['iterations of one epoch'] + i)
             
-            logswriter.add_summary(summ, (epoch + 1) * 1562 + i)
+            logswriter.add_summary(summ, (epoch + 1) * train_params['iterations of one epoch'] + i)
             
             print 'student accuracy: %f; l2_0: %f; l2_1:%f; l2_2:%f' % (d,x,y,z)
             print '-----------------'
@@ -450,7 +450,7 @@ if __name__ == '__main__':
         num_val = val.num_examples
         temp_val =  []
         for i in range(num_val // 200):
-            batch = val.next_batch(200)
+            batch = val.next_batch(200, is_training=False)
             feed_dict_val = {
                 student_input: batch[0],
                 labels: batch[1],
@@ -481,8 +481,8 @@ if __name__ == '__main__':
         ])
         logswriter.add_summary(summary, epoch)
         
-        saver.save(sess, save_path+'model.ckpt', global_step=1562*(epoch+1))
-        print ("saved model at step %d" % (1562*(epoch+1)))
+        saver.save(sess, save_path+'model.ckpt', global_step=train_params['iterations of one epoch']*(epoch+1))
+        print ("saved model at step %d" % (train_params['iterations of one epoch']*(epoch+1)))
         counter += 1
         time_per_epoch = time.time() - start_time
         seconds_left = int((10 - epoch) * time_per_epoch)
