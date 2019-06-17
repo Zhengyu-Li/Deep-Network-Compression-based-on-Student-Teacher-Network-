@@ -6,8 +6,8 @@ from datetime import timedelta
 import numpy as np
 import tensorflow as tf
 #os.environ['TF_CPP_MIN_LOG_LEVEL']='2'
-#os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   
-#os.environ["CUDA_VISIBLE_DEVICES"]="1" # here 0 refers to GPU 0
+os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   
+os.environ["CUDA_VISIBLE_DEVICES"]="1" # here 0 refers to GPU 0
 
 TF_VERSION = float('.'.join(tf.__version__.split('.')[:2]))
 
@@ -88,12 +88,12 @@ class DenseNet:
 
     def _initialize_session(self):
         """Initialize session, variables, saver"""
-        #gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8)
-        #config = tf.ConfigProto(gpu_options = gpu_options)
+        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.5)
+        config = tf.ConfigProto(gpu_options = gpu_options)
         # restrict model GPU memory utilization to min required
-        config = tf.ConfigProto()
+        #config = tf.ConfigProto()
         #config.gpu_options.allow_growth = True
-        self.sess = tf.Session()
+        self.sess = tf.Session(config=config)
         tf_ver = int(tf.__version__.split('.')[1])
         if TF_VERSION <= 0.10:
             self.sess.run(tf.initialize_all_variables())
@@ -377,7 +377,7 @@ class DenseNet:
 
     def train_all_epochs(self, train_params, epochs, current_step):
         n_epochs = epochs
-        pr_epochs = current_step//1562
+        pr_epochs = current_step//train_params['iterations of one epoch']
         learning_rate = train_params['initial_learning_rate']
         batch_size = train_params['batch_size']
         reduce_lr_epoch_1 = train_params['reduce_lr_epoch_1']
